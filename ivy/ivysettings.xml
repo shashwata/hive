@@ -47,6 +47,7 @@
       <artifact pattern="${hadoop.mirror2}/hadoop/core/[artifact]-[revision]/[artifact]-[revision].[ext]" />
     </url>
 
+    <ibiblio name="cloudera" root="https://repository.cloudera.com/artifactory/cdh-build/" m2compatible="true" />
     <ibiblio name="maven2" root="${repo.maven.org}" pattern="${maven2.pattern.ext}" m2compatible="true"/>
     <ibiblio name="apache-snapshot" root="${snapshot.apache.org}" m2compatible="true"
              checkmodified="${ivy.checkmodified}" 
@@ -65,6 +66,7 @@
            checkmodified="${ivy.checkmodified}" 
            changingPattern="${ivy.changingPattern}">
       <resolver ref="apache-snapshot"/>
+      <resolver ref="cloudera" />
       <resolver ref="maven2"/>
       <resolver ref="datanucleus-repo"/>
       <resolver ref="hadoop-source"/>
@@ -74,11 +76,13 @@
     <chain name="internal" dual="true">
       <resolver ref="fs"/>
       <resolver ref="apache-snapshot"/>
+      <resolver ref="cloudera" />
       <resolver ref="maven2"/>
       <resolver ref="datanucleus-repo"/>
     </chain>
 
     <chain name="external">
+      <resolver ref="cloudera" />
       <resolver ref="maven2"/>
       <resolver ref="datanucleus-repo"/>
     </chain>

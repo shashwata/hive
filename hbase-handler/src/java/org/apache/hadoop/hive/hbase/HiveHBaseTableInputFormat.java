@@ -31,7 +31,6 @@ import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
-import org.apache.hadoop.hbase.mapred.TableMapReduceUtil;
 import org.apache.hadoop.hbase.mapreduce.TableInputFormatBase;
 import org.apache.hadoop.hbase.mapreduce.TableSplit;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -415,8 +414,10 @@ public class HiveHBaseTableInputFormat extends TableInputFormatBase
   @Override
   public InputSplit[] getSplits(JobConf jobConf, int numSplits) throws IOException {
 
+    //[shashwat] Commenting as it is not present in hive-0.7.1-cdh3u5 source as well
+    //Method TableMapReduceUtil.initCredentials(jobConf) is not available in hbase-0.90.6-cdh3u5
     //obtain delegation tokens for the job
-    TableMapReduceUtil.initCredentials(jobConf);
+    //TableMapReduceUtil.initCredentials(jobConf);
 
     String hbaseTableName = jobConf.get(HBaseSerDe.HBASE_TABLE_NAME);
     setHTable(new HTable(HBaseConfiguration.create(jobConf), Bytes.toBytes(hbaseTableName)));
@@ -507,4 +508,5 @@ public class HiveHBaseTableInputFormat extends TableInputFormatBase
       throw new IOException("Malformed string: " + spec);
     }
   }
+
 }

@@ -29,7 +29,6 @@ import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
-import org.apache.hadoop.hbase.mapred.TableMapReduceUtil;
 import org.apache.hadoop.hbase.mapreduce.TableOutputFormat;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.ql.exec.FileSinkOperator.RecordWriter;
@@ -103,8 +102,10 @@ public class HiveHBaseTableOutputFormat extends
   @Override
   public void checkOutputSpecs(FileSystem fs, JobConf jc) throws IOException {
 
+    //[shashwat] Commenting as it is not present in hive-0.7.1-cdh3u5 source as well
+    //Method TableMapReduceUtil.initCredentials(jobConf) is not available in hbase-0.90.6-cdh3u5
     //obtain delegation tokens for the job
-    TableMapReduceUtil.initCredentials(jc);
+    //TableMapReduceUtil.initCredentials(jc);
 
     String hbaseTableName = jc.get(HBaseSerDe.HBASE_TABLE_NAME);
     jc.set(TableOutputFormat.OUTPUT_TABLE, hbaseTableName);
