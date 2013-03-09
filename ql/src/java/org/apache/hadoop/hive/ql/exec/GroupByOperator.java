@@ -214,9 +214,6 @@ public class GroupByOperator extends Operator<GroupByDesc> implements
         HiveConf.ConfVars.HIVESENDHEARTBEAT);
     countAfterReport = 0;
     groupingSetsPresent = conf.isGroupingSetsPresent();
-    groupingSets = conf.getListGroupingSets();
-    groupingSetsPosition = conf.getGroupingSetPosition();
-
     ObjectInspector rowInspector = inputObjInspectors[0];
 
     // init keyFields
@@ -236,6 +233,8 @@ public class GroupByOperator extends Operator<GroupByDesc> implements
     // Initialize the constants for the grouping sets, so that they can be re-used for
     // each row
     if (groupingSetsPresent) {
+      groupingSets = conf.getListGroupingSets();
+      groupingSetsPosition = conf.getGroupingSetPosition();
       newKeysGroupingSets = new ArrayList<Object>();
       groupingSetsBitSet = new ArrayList<FastBitSet>();
 
@@ -363,6 +362,12 @@ public class GroupByOperator extends Operator<GroupByDesc> implements
     objectInspectors = new ArrayList<ObjectInspector>(totalFields);
     for (ExprNodeEvaluator keyField : keyFields) {
       objectInspectors.add(null);
+    }
+    MapredContext context = MapredContext.get();
+    if (context != null) {
+      for (GenericUDAFEvaluator genericUDAFEvaluator : aggregationEvaluators) {
+        context.setup(genericUDAFEvaluator);
+      }
     }
     for (int i = 0; i < aggregationEvaluators.length; i++) {
       ObjectInspector roi = aggregationEvaluators[i].init(conf.getAggregators()

@@ -63,11 +63,13 @@ POSTHOOK: Lineage: ss_i_part PARTITION(p=3).key EXPRESSION [(src)src.FieldSchema
 POSTHOOK: Lineage: ss_i_part PARTITION(p=3).value SIMPLE [(src)src.FieldSchema(name:value, type:string, comment:default), ]
 PREHOOK: query: create table ss_src2 as select key, value from ss_i_part
 PREHOOK: type: CREATETABLE_AS_SELECT
+PREHOOK: Input: default@ss_i_part
 PREHOOK: Input: default@ss_i_part@p=1
 PREHOOK: Input: default@ss_i_part@p=2
 PREHOOK: Input: default@ss_i_part@p=3
 POSTHOOK: query: create table ss_src2 as select key, value from ss_i_part
 POSTHOOK: type: CREATETABLE_AS_SELECT
+POSTHOOK: Input: default@ss_i_part
 POSTHOOK: Input: default@ss_i_part@p=1
 POSTHOOK: Input: default@ss_i_part@p=2
 POSTHOOK: Input: default@ss_i_part@p=3
@@ -239,11 +241,13 @@ POSTHOOK: Lineage: ss_i_part PARTITION(p=3).key EXPRESSION [(src)src.FieldSchema
 POSTHOOK: Lineage: ss_i_part PARTITION(p=3).value SIMPLE [(src)src.FieldSchema(name:value, type:string, comment:default), ]
 PREHOOK: query: create table ss_src3 as select key, value from ss_i_part
 PREHOOK: type: CREATETABLE_AS_SELECT
+PREHOOK: Input: default@ss_i_part
 PREHOOK: Input: default@ss_i_part@p=1
 PREHOOK: Input: default@ss_i_part@p=2
 PREHOOK: Input: default@ss_i_part@p=3
 POSTHOOK: query: create table ss_src3 as select key, value from ss_i_part
 POSTHOOK: type: CREATETABLE_AS_SELECT
+POSTHOOK: Input: default@ss_i_part
 POSTHOOK: Input: default@ss_i_part@p=1
 POSTHOOK: Input: default@ss_i_part@p=2
 POSTHOOK: Input: default@ss_i_part@p=3
@@ -4116,19 +4120,12 @@ STAGE PLANS:
                     expr: _col4
                     type: int
               outputColumnNames: _col0, _col1
-              Select Operator
-                expressions:
-                      expr: _col0
-                      type: int
-                      expr: _col1
-                      type: int
-                outputColumnNames: _col0, _col1
-                File Output Operator
-                  compressed: false
-                  GlobalTableId: 0
-                  table:
-                      input format: org.apache.hadoop.mapred.TextInputFormat
-                      output format: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
+              File Output Operator
+                compressed: false
+                GlobalTableId: 0
+                table:
+                    input format: org.apache.hadoop.mapred.TextInputFormat
+                    output format: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
 
   Stage: Stage-0
     Fetch Operator

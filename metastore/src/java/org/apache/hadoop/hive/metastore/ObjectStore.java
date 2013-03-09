@@ -1286,7 +1286,7 @@ public class ObjectStore implements RawStore, Configurable {
       return null;
     }
     return new Partition(mpart.getValues(), dbName, tblName, mpart.getCreateTime(),
-        mpart.getLastAccessTime(), convertToStorageDescriptor(mpart.getSd(), true),
+        mpart.getLastAccessTime(), convertToStorageDescriptor(mpart.getSd(), false),
         mpart.getParameters());
   }
 
@@ -2029,7 +2029,9 @@ public class ObjectStore implements RawStore, Configurable {
     oldp.setValues(newp.getValues());
     oldp.setPartitionName(newp.getPartitionName());
     oldp.setParameters(newPart.getParameters());
-    copyMSD(newp.getSd(), oldp.getSd());
+    if (!TableType.VIRTUAL_VIEW.name().equals(oldp.getTable().getTableType())) {
+      copyMSD(newp.getSd(), oldp.getSd());
+    }
     if (newp.getCreateTime() != oldp.getCreateTime()) {
       oldp.setCreateTime(newp.getCreateTime());
     }
@@ -2041,16 +2043,23 @@ public class ObjectStore implements RawStore, Configurable {
   public void alterPartition(String dbname, String name, List<String> part_vals, Partition newPart)
       throws InvalidObjectException, MetaException {
     boolean success = false;
+    Exception e = null;
     try {
       openTransaction();
       alterPartitionNoTxn(dbname, name, part_vals, newPart);
       // commit the changes
       success = commitTransaction();
+    } catch (Exception exception) {
+      e = exception;
     } finally {
       if (!success) {
         rollbackTransaction();
-        throw new MetaException(
+        MetaException metaException = new MetaException(
             "The transaction for alter partition did not commit successfully.");
+        if (e != null) {
+          metaException.initCause(e);
+        }
+        throw metaException;
       }
     }
   }
@@ -2058,6 +2067,7 @@ public class ObjectStore implements RawStore, Configurable {
   public void alterPartitions(String dbname, String name, List<List<String>> part_vals,
       List<Partition> newParts) throws InvalidObjectException, MetaException {
     boolean success = false;
+    Exception e = null;
     try {
       openTransaction();
       Iterator<List<String>> part_val_itr = part_vals.iterator();
@@ -2067,11 +2077,17 @@ public class ObjectStore implements RawStore, Configurable {
       }
       // commit the changes
       success = commitTransaction();
+    } catch (Exception exception) {
+      e = exception;
     } finally {
       if (!success) {
         rollbackTransaction();
-        throw new MetaException(
+        MetaException metaException = new MetaException(
             "The transaction for alter partition did not commit successfully.");
+        if (e != null) {
+          metaException.initCause(e);
+        }
+        throw metaException;
       }
     }
   }

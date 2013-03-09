@@ -113,6 +113,7 @@ import org.apache.hadoop.hive.ql.plan.AlterIndexDesc;
 import org.apache.hadoop.hive.ql.plan.AlterTableDesc;
 import org.apache.hadoop.hive.ql.plan.AlterTableDesc.AlterTableTypes;
 import org.apache.hadoop.hive.ql.plan.AlterTableSimpleDesc;
+import org.apache.hadoop.hive.ql.plan.AlterTableAlterPartDesc;
 import org.apache.hadoop.hive.ql.plan.CreateDatabaseDesc;
 import org.apache.hadoop.hive.ql.plan.CreateIndexDesc;
 import org.apache.hadoop.hive.ql.plan.CreateTableDesc;
@@ -205,7 +206,8 @@ public class DDLTask extends Task<DDLWork> implements Serializable {
             HiveConf.ConfVars.HIVE_DDL_OUTPUT_FORMAT.varname, "text"))) {
       formatter = new JsonMetaDataFormatter();
     } else {
-      formatter = new TextMetaDataFormatter();
+      formatter = new TextMetaDataFormatter(
+                      conf.getIntVar(HiveConf.ConfVars.CLIPRETTYOUTPUTNUMCOLS));
     }
 
     INTERMEDIATE_ARCHIVED_DIR_SUFFIX =
@@ -415,6 +417,11 @@ public class DDLTask extends Task<DDLWork> implements Serializable {
       AlterTablePartMergeFilesDesc mergeFilesDesc = work.getMergeFilesDesc();
       if (mergeFilesDesc != null) {
         return mergeFiles(db, mergeFilesDesc);
+      }
+
+      AlterTableAlterPartDesc alterPartDesc = work.getAlterTableAlterPartDesc();
+      if(alterPartDesc != null) {
+        return alterTableAlterPart(db, alterPartDesc);
       }
 
       TruncateTableDesc truncateTableDesc = work.getTruncateTblDesc();
@@ -1065,6 +1072,49 @@ public class DDLTask extends Task<DDLWork> implements Serializable {
         .getPartition(tbl, renamePartitionDesc.getNewPartSpec(), false);
     work.getInputs().add(new ReadEntity(oldPart));
     work.getOutputs().add(new WriteEntity(newPart));
+    return 0;
+  }
+
+  /**
+  * Alter partition column type in a table
+  *
+  * @param db
+  *          Database to rename the partition.
+  * @param alterPartitionDesc
+  *          change partition column type.
+  * @return Returns 0 when execution succeeds and above 0 if it fails.
+  * @throws HiveException
+  */
+  private int alterTableAlterPart(Hive db, AlterTableAlterPartDesc alterPartitionDesc)
+    throws HiveException {
+
+    Table tbl = db.getTable(alterPartitionDesc.getDbName(), alterPartitionDesc.getTableName());
+    String tabName = alterPartitionDesc.getTableName();
+
+    // This is checked by DDLSemanticAnalyzer
+    assert(tbl.isPartitioned());
+
+    List<FieldSchema> newPartitionKeys = new ArrayList<FieldSchema>();
+
+    for(FieldSchema col : tbl.getTTable().getPartitionKeys()) {
+      if (col.getName().compareTo(alterPartitionDesc.getPartKeySpec().getName()) == 0) {
+        newPartitionKeys.add(alterPartitionDesc.getPartKeySpec());
+      } else {
+        newPartitionKeys.add(col);
+      }
+    }
+
+    tbl.getTTable().setPartitionKeys(newPartitionKeys);
+
+    try {
+      db.alterTable(tabName, tbl);
+    } catch (InvalidOperationException e) {
+      throw new HiveException("Uable to update table");
+    }
+
+    work.getInputs().add(new ReadEntity(tbl));
+    work.getOutputs().add(new WriteEntity(tbl));
+
     return 0;
   }
 
@@ -2853,7 +2903,7 @@ public class DDLTask extends Task<DDLWork> implements Serializable {
       }
 
       formatter.describeTable(outStream, colPath, tableName, tbl, part, cols,
-                              descTbl.isFormatted(), descTbl.isExt());
+                              descTbl.isFormatted(), descTbl.isExt(), descTbl.isPretty());
 
       LOG.info("DDLTask: written data for " + tbl.getTableName());
       ((FSDataOutputStream) outStream).close();
@@ -3154,29 +3204,28 @@ public class DDLTask extends Task<DDLWork> implements Serializable {
       // validate sort columns and bucket columns
       List<String> columns = Utilities.getColumnNamesFromFieldSchema(tbl
           .getCols());
-      Utilities.validateColumnNames(columns, alterTbl.getBucketColumns());
+      if (!alterTbl.isTurnOffSorting()) {
+        Utilities.validateColumnNames(columns, alterTbl.getBucketColumns());
+      }
       if (alterTbl.getSortColumns() != null) {
         Utilities.validateColumnNames(columns, Utilities
             .getColumnNamesFromSortCols(alterTbl.getSortColumns()));
       }
 
-      int numBuckets = -1;
-      ArrayList<String> bucketCols = null;
-      ArrayList<Order> sortCols = null;
+      StorageDescriptor sd = part == null ? tbl.getTTable().getSd() : part.getTPartition().getSd();
 
-      // -1 buckets means to turn off bucketing
-      if (alterTbl.getNumberBuckets() == -1) {
-        bucketCols = new ArrayList<String>();
-        sortCols = new ArrayList<Order>();
-        numBuckets = -1;
+      if (alterTbl.isTurnOffSorting()) {
+        sd.setSortCols(new ArrayList<Order>());
+      } else if (alterTbl.getNumberBuckets() == -1) {
+        // -1 buckets means to turn off bucketing
+        sd.setBucketCols(new ArrayList<String>());
+        sd.setNumBuckets(-1);
+        sd.setSortCols(new ArrayList<Order>());
       } else {
-        bucketCols = alterTbl.getBucketColumns();
-        sortCols = alterTbl.getSortColumns();
-        numBuckets = alterTbl.getNumberBuckets();
+        sd.setBucketCols(alterTbl.getBucketColumns());
+        sd.setNumBuckets(alterTbl.getNumberBuckets());
+        sd.setSortCols(alterTbl.getSortColumns());
       }
-      tbl.getTTable().getSd().setBucketCols(bucketCols);
-      tbl.getTTable().getSd().setNumBuckets(numBuckets);
-      tbl.getTTable().getSd().setSortCols(sortCols);
     } else if (alterTbl.getOp() == AlterTableDesc.AlterTableTypes.ALTERLOCATION) {
       String newLocation = alterTbl.getNewLocation();
       try {
@@ -3747,6 +3796,10 @@ public class DDLTask extends Task<DDLWork> implements Serializable {
       String targetTableName = crtTbl.getTableName();
       tbl=db.newTable(targetTableName);
 
+      if (crtTbl.getTblProps() != null) {
+        tbl.getTTable().getParameters().putAll(crtTbl.getTblProps());
+      }
+
       tbl.setTableType(TableType.MANAGED_TABLE);
 
       if (crtTbl.isExternal()) {
@@ -3806,6 +3859,10 @@ public class DDLTask extends Task<DDLWork> implements Serializable {
         params.keySet().retainAll(paramsList);
       } else {
         params.clear();
+      }
+
+      if (crtTbl.getTblProps() != null) {
+        params.putAll(crtTbl.getTblProps());
       }
 
       if (crtTbl.isExternal()) {

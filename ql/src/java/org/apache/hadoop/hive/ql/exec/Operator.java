@@ -53,7 +53,9 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
   // Bean methods
 
   private static final long serialVersionUID = 1L;
+  List<OperatorHook> operatorHooks;
 
+  private Configuration configuration;
   protected List<Operator<? extends OperatorDesc>> childOperators;
   protected List<Operator<? extends OperatorDesc>> parentOperators;
   protected String operatorId;
@@ -129,8 +131,15 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
     this.childOperators = childOperators;
   }
 
+  public Configuration getConfiguration() {
+    return configuration;
+  }
   public List<Operator<? extends OperatorDesc>> getChildOperators() {
     return childOperators;
+  }
+
+  public int getNumChild() {
+    return childOperators == null ? 0 : childOperators.size();
   }
 
   /**
@@ -157,6 +166,10 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
 
   public List<Operator<? extends OperatorDesc>> getParentOperators() {
     return parentOperators;
+  }
+
+  public int getNumParent() {
+    return parentOperators == null ? 0 : parentOperators.size();
   }
 
   protected T conf;
@@ -224,6 +237,17 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
    */
   public String getIdentifier() {
     return id;
+  }
+
+  public void setOperatorHooks(List<OperatorHook> opHooks){
+    operatorHooks = opHooks;
+    if (childOperators == null) {
+      return;
+    }
+
+    for (Operator<? extends OperatorDesc> op : childOperators) {
+      op.setOperatorHooks(opHooks);
+    }
   }
 
   public void setReporter(Reporter rep) {
@@ -313,6 +337,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
       return;
     }
 
+    this.configuration = hconf;
     this.out = null;
     if (!areAllParentsInitialized()) {
       return;
@@ -409,6 +434,34 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
     }
   }
 
+  private void enterOperatorHooks(OperatorHookContext opHookContext) throws HiveException {
+    if (this.operatorHooks == null) {
+      return;
+    }
+    for(OperatorHook opHook : this.operatorHooks) {
+      opHook.enter(opHookContext);
+    }
+  }
+
+  private void exitOperatorHooks(OperatorHookContext opHookContext) throws HiveException {
+    if (this.operatorHooks == null) {
+      return;
+    }
+    for(OperatorHook opHook : this.operatorHooks) {
+      opHook.exit(opHookContext);
+    }
+  }
+
+  private void closeOperatorHooks(OperatorHookContext opHookContext) throws HiveException {
+    if (this.operatorHooks == null) {
+      return;
+    }
+    for(OperatorHook opHook : this.operatorHooks) {
+      opHook.close(opHookContext);
+    }
+  }
+
+
   /**
    * Collects all the parent's output object inspectors and calls actual
    * initialization method.
@@ -470,8 +523,11 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
     if (fatalError) {
       return;
     }
+    OperatorHookContext opHookContext = new OperatorHookContext(this, row);
     preProcessCounter();
+    enterOperatorHooks(opHookContext);
     processOp(row, tag);
+    exitOperatorHooks(opHookContext);
     postProcessCounter();
   }
 
@@ -554,6 +610,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
 
     LOG.info(id + " forwarded " + cntr + " rows");
 
+    closeOperatorHooks(new OperatorHookContext(this, null));
     // call the operator specific close routine
     closeOp(abort);
 
@@ -1426,7 +1483,43 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
     this.useBucketizedHiveInputFormat = useBucketizedHiveInputFormat;
   }
 
+  /**
+   * Whether this operator supports automatic sort merge join.
+   * The stack is traversed, and this method is invoked for all the operators.
+   * @return TRUE if yes, FALSE otherwise.
+   */
+  public boolean supportAutomaticSortMergeJoin() {
+    return false;
+  }
+
   public boolean supportUnionRemoveOptimization() {
     return false;
+  }
+
+  /*
+   * This operator is allowed before mapjoin. Eventually, mapjoin hint should be done away with.
+   * But, since bucketized mapjoin and sortmerge join depend on it completely. it is needed.
+   * Check the operators which are allowed before mapjoin.
+   */
+  public boolean opAllowedBeforeMapJoin() {
+    return true;
+  }
+
+  /*
+   * This operator is allowed after mapjoin. Eventually, mapjoin hint should be done away with.
+   * But, since bucketized mapjoin and sortmerge join depend on it completely. it is needed.
+   * Check the operators which are allowed after mapjoin.
+   */
+  public boolean opAllowedAfterMapJoin() {
+    return true;
+  }
+
+  /*
+   * If this task contains a join, it can be converted to a map-join task if this operator is
+   * present in the mapper. For eg. if a sort-merge join operator is present followed by a regular
+   * join, it cannot be converted to a auto map-join.
+   */
+  public boolean opAllowedConvertMapJoin() {
+    return true;
   }
 }

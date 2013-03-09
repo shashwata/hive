@@ -126,6 +126,7 @@ import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe;
 import org.apache.hadoop.mapred.InputFormat;
 import org.apache.hadoop.mapred.TextInputFormat;
+import org.apache.hadoop.hive.ql.plan.AlterTableAlterPartDesc;
 
 /**
  * DDLSemanticAnalyzer.
@@ -149,6 +150,7 @@ public class DDLSemanticAnalyzer extends BaseSemanticAnalyzer {
     TokenToTypeName.put(HiveParser.TOK_DATE, serdeConstants.DATE_TYPE_NAME);
     TokenToTypeName.put(HiveParser.TOK_DATETIME, serdeConstants.DATETIME_TYPE_NAME);
     TokenToTypeName.put(HiveParser.TOK_TIMESTAMP, serdeConstants.TIMESTAMP_TYPE_NAME);
+    TokenToTypeName.put(HiveParser.TOK_DECIMAL, serdeConstants.DECIMAL_TYPE_NAME);
   }
 
   public static String getTypeName(int token) throws SemanticException {
@@ -217,6 +219,8 @@ public class DDLSemanticAnalyzer extends BaseSemanticAnalyzer {
         analyzeAlterTableSkewedLocation(ast, tableName, partSpec);
       } else if (ast.getToken().getType() == HiveParser.TOK_TABLEBUCKETS) {
         analyzeAlterTableBucketNum(ast, tableName, partSpec);
+      } else if (ast.getToken().getType() == HiveParser.TOK_ALTERTABLE_CLUSTER_SORT) {
+        analyzeAlterTableClusterSort(ast, tableName, partSpec);
       }
       break;
     }
@@ -327,14 +331,14 @@ public class DDLSemanticAnalyzer extends BaseSemanticAnalyzer {
     case HiveParser.TOK_ALTERTABLE_DROPPARTS:
       analyzeAlterTableDropParts(ast, false);
       break;
+    case HiveParser.TOK_ALTERTABLE_ALTERPARTS:
+      analyzeAlterTableAlterParts(ast);
+      break;
     case HiveParser.TOK_ALTERTABLE_PROPERTIES:
       analyzeAlterTableProps(ast, false, false);
       break;
     case HiveParser.TOK_DROPTABLE_PROPERTIES:
       analyzeAlterTableProps(ast, false, true);
-      break;
-    case HiveParser.TOK_ALTERTABLE_CLUSTER_SORT:
-      analyzeAlterTableClusterSort(ast);
       break;
     case HiveParser.TOK_ALTERINDEX_REBUILD:
       analyzeAlterIndexRebuild(ast);
@@ -1387,24 +1391,23 @@ public class DDLSemanticAnalyzer extends BaseSemanticAnalyzer {
     }
   }
 
-  private void analyzeAlterTableClusterSort(ASTNode ast)
-      throws SemanticException {
-    String tableName = getUnescapedName((ASTNode)ast.getChild(0));
-    Table tab = getTable(tableName, true);
+  private void analyzeAlterTableClusterSort(ASTNode ast, String tableName,
+      HashMap<String, String> partSpec) throws SemanticException {
+    addInputsOutputsAlterTable(tableName, partSpec);
 
-    inputs.add(new ReadEntity(tab));
-    outputs.add(new WriteEntity(tab));
-
-    validateAlterTableType(tab, AlterTableTypes.ADDCLUSTERSORTCOLUMN);
-
-    if (ast.getChildCount() == 1) {
-      // This means that we want to turn off bucketing
-      AlterTableDesc alterTblDesc = new AlterTableDesc(tableName, -1,
-          new ArrayList<String>(), new ArrayList<Order>());
-      rootTasks.add(TaskFactory.get(new DDLWork(getInputs(), getOutputs(),
-          alterTblDesc), conf));
-    } else {
-      ASTNode buckets = (ASTNode) ast.getChild(1);
+    AlterTableDesc alterTblDesc;
+    switch (ast.getChild(0).getType()) {
+    case HiveParser.TOK_NOT_CLUSTERED:
+      alterTblDesc = new AlterTableDesc(tableName, -1, new ArrayList<String>(),
+          new ArrayList<Order>(), partSpec);
+      rootTasks.add(TaskFactory.get(new DDLWork(getInputs(), getOutputs(), alterTblDesc), conf));
+      break;
+    case HiveParser.TOK_NOT_SORTED:
+      alterTblDesc = new AlterTableDesc(tableName, true, partSpec);
+      rootTasks.add(TaskFactory.get(new DDLWork(getInputs(), getOutputs(), alterTblDesc), conf));
+      break;
+    case HiveParser.TOK_TABLEBUCKETS:
+      ASTNode buckets = (ASTNode) ast.getChild(0);
       List<String> bucketCols = getColumnNames((ASTNode) buckets.getChild(0));
       List<Order> sortCols = new ArrayList<Order>();
       int numBuckets = -1;
@@ -1418,10 +1421,11 @@ public class DDLSemanticAnalyzer extends BaseSemanticAnalyzer {
         throw new SemanticException(ErrorMsg.INVALID_BUCKET_NUMBER.getMsg());
       }
 
-      AlterTableDesc alterTblDesc = new AlterTableDesc(tableName, numBuckets,
-          bucketCols, sortCols);
+      alterTblDesc = new AlterTableDesc(tableName, numBuckets,
+          bucketCols, sortCols, partSpec);
       rootTasks.add(TaskFactory.get(new DDLWork(getInputs(), getOutputs(),
           alterTblDesc), conf));
+      break;
     }
   }
 
@@ -1736,6 +1740,7 @@ public class DDLSemanticAnalyzer extends BaseSemanticAnalyzer {
       int descOptions = ast.getChild(1).getType();
       descTblDesc.setFormatted(descOptions == HiveParser.KW_FORMATTED);
       descTblDesc.setExt(descOptions == HiveParser.KW_EXTENDED);
+      descTblDesc.setPretty(descOptions == HiveParser.KW_PRETTY);
     }
     rootTasks.add(TaskFactory.get(new DDLWork(getInputs(), getOutputs(),
         descTblDesc), conf));
@@ -2276,7 +2281,60 @@ public class DDLSemanticAnalyzer extends BaseSemanticAnalyzer {
         dropTblDesc), conf));
   }
 
-  /**
+  private void analyzeAlterTableAlterParts(ASTNode ast)
+      throws SemanticException {
+    // get table name
+    String tblName = getUnescapedName((ASTNode)ast.getChild(0));
+
+    Table tab = null;
+
+    // check if table exists.
+    try {
+      tab = db.getTable(db.getCurrentDatabase(), tblName, true);
+      inputs.add(new ReadEntity(tab));
+    } catch (HiveException e) {
+      throw new SemanticException(ErrorMsg.INVALID_TABLE.getMsg(tblName));
+    }
+
+    // validate the DDL is a valid operation on the table.
+    validateAlterTableType(tab, AlterTableTypes.ALTERPARTITION, false);
+
+    // Alter table ... partition column ( column newtype) only takes one column at a time.
+    // It must have a column name followed with type.
+    ASTNode colAst = (ASTNode) ast.getChild(1);
+    assert(colAst.getChildCount() == 2);
+
+    FieldSchema newCol = new FieldSchema();
+
+    // get column name
+    String name = colAst.getChild(0).getText().toLowerCase();
+    newCol.setName(unescapeIdentifier(name));
+
+    // get column type
+    ASTNode typeChild = (ASTNode) (colAst.getChild(1));
+    newCol.setType(getTypeStringFromAST(typeChild));
+
+    // check if column is defined or not
+    boolean fFoundColumn = false;
+    for( FieldSchema col : tab.getTTable().getPartitionKeys()) {
+      if (col.getName().compareTo(newCol.getName()) == 0) {
+        fFoundColumn = true;
+      }
+    }
+
+    // raise error if we could not find the column
+    if (!fFoundColumn) {
+      throw new SemanticException(ErrorMsg.INVALID_COLUMN.getMsg(newCol.getName()));
+    }
+
+    AlterTableAlterPartDesc alterTblAlterPartDesc =
+            new AlterTableAlterPartDesc(db.getCurrentDatabase(), tblName, newCol);
+
+    rootTasks.add(TaskFactory.get(new DDLWork(getInputs(), getOutputs(),
+            alterTblAlterPartDesc), conf));
+  }
+
+    /**
    * Add one or more partitions to a table. Useful when the data has been copied
    * to the right location by some other process.
    *

@@ -21,16 +21,19 @@ package org.apache.hadoop.hive.metastore;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -157,7 +160,9 @@ public class MetaStoreUtils {
    *          hadoop config
    * @param schema
    *          the properties to use to instantiate the deserializer
-   * @return the Deserializer
+   * @return
+   *   Returns instantiated deserializer by looking up class name of deserializer stored in passed
+   *   in properties. Also, initializes the deserializer with schema stored in passed in properties.
    * @exception MetaException
    *              if any problems instantiating the Deserializer
    *
@@ -189,7 +194,10 @@ public class MetaStoreUtils {
    *          - hadoop config
    * @param table
    *          the table
-   * @return the Deserializer
+   * @return
+   *   Returns instantiated deserializer by looking up class name of deserializer stored in
+   *   storage descriptor of passed in table. Also, initializes the deserializer with schema
+   *   of table.
    * @exception MetaException
    *              if any problems instantiating the Deserializer
    *
@@ -204,7 +212,7 @@ public class MetaStoreUtils {
     }
     try {
       Deserializer deserializer = SerDeUtils.lookupDeserializer(lib);
-      deserializer.initialize(conf, MetaStoreUtils.getSchema(table));
+      deserializer.initialize(conf, MetaStoreUtils.getTableMetadata(table));
       return deserializer;
     } catch (RuntimeException e) {
       throw e;
@@ -226,7 +234,10 @@ public class MetaStoreUtils {
    * @param part
    *          the partition
    * @param table the table
-   * @return the Deserializer
+   * @return
+   *   Returns instantiated deserializer by looking up class name of deserializer stored in
+   *   storage descriptor of passed in partition. Also, initializes the deserializer with
+   *   schema of partition.
    * @exception MetaException
    *              if any problems instantiating the Deserializer
    *
@@ -237,7 +248,7 @@ public class MetaStoreUtils {
     String lib = part.getSd().getSerdeInfo().getSerializationLib();
     try {
       Deserializer deserializer = SerDeUtils.lookupDeserializer(lib);
-      deserializer.initialize(conf, MetaStoreUtils.getSchema(part, table));
+      deserializer.initialize(conf, MetaStoreUtils.getPartitionMetadata(part, table));
       return deserializer;
     } catch (RuntimeException e) {
       throw e;
@@ -317,10 +328,37 @@ public class MetaStoreUtils {
     return false;
   }
 
-  static public boolean validateColNames(List<FieldSchema> cols) {
+  static public boolean validateTblColumns(List<FieldSchema> cols) {
     for (FieldSchema fieldSchema : cols) {
       if (!validateName(fieldSchema.getName())) {
         return false;
+      }
+      if (!validateColumnType(fieldSchema.getType())) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * validate column type
+   *
+   * if it is predefined, yes. otherwise no
+   * @param name
+   * @return
+   */
+  static public boolean validateColumnType(String type) {
+    int last = 0;
+    boolean lastAlphaDigit = Character.isLetterOrDigit(type.charAt(last));
+    for (int i = 1; i <= type.length(); i++) {
+      if (i == type.length()
+          || Character.isLetterOrDigit(type.charAt(i)) != lastAlphaDigit) {
+        String token = type.substring(last, i);
+        last = i;
+        if (!hiveThriftTypeMap.contains(token)) {
+          return false;
+        }
+        break;
       }
     }
     return true;
@@ -395,7 +433,7 @@ public class MetaStoreUtils {
         org.apache.hadoop.hive.serde.serdeConstants.STRING_TYPE_NAME, "string");
     typeToThriftTypeMap.put(
         org.apache.hadoop.hive.serde.serdeConstants.BINARY_TYPE_NAME, "binary");
-    // These 3 types are not supported yet.
+    // These 4 types are not supported yet.
     // We should define a complex type date in thrift that contains a single int
     // member, and DynamicSerDe
     // should convert it to date type at runtime.
@@ -406,6 +444,17 @@ public class MetaStoreUtils {
     typeToThriftTypeMap
         .put(org.apache.hadoop.hive.serde.serdeConstants.TIMESTAMP_TYPE_NAME,
             "timestamp");
+    typeToThriftTypeMap.put(
+        org.apache.hadoop.hive.serde.serdeConstants.DECIMAL_TYPE_NAME, "decimal");
+  }
+
+  static Set<String> hiveThriftTypeMap; //for validation
+  static {
+    hiveThriftTypeMap = new HashSet<String>();
+    hiveThriftTypeMap.addAll(org.apache.hadoop.hive.serde.serdeConstants.PrimitiveTypes);
+    hiveThriftTypeMap.addAll(org.apache.hadoop.hive.serde.serdeConstants.CollectionTypes);
+    hiveThriftTypeMap.add(org.apache.hadoop.hive.serde.serdeConstants.UNION_TYPE_NAME);
+    hiveThriftTypeMap.add(org.apache.hadoop.hive.serde.serdeConstants.STRUCT_TYPE_NAME);
   }
 
   /**
@@ -491,10 +540,19 @@ public class MetaStoreUtils {
     return ddl.toString();
   }
 
-  public static Properties getSchema(
+  public static Properties getTableMetadata(
       org.apache.hadoop.hive.metastore.api.Table table) {
     return MetaStoreUtils.getSchema(table.getSd(), table.getSd(), table
         .getParameters(), table.getDbName(), table.getTableName(), table.getPartitionKeys());
+  }
+
+  public static Properties getPartitionMetadata(
+      org.apache.hadoop.hive.metastore.api.Partition partition,
+      org.apache.hadoop.hive.metastore.api.Table table) {
+    return MetaStoreUtils
+        .getSchema(partition.getSd(), partition.getSd(), partition
+            .getParameters(), table.getDbName(), table.getTableName(),
+            table.getPartitionKeys());
   }
 
   public static Properties getSchema(
@@ -1029,9 +1087,12 @@ public class MetaStoreUtils {
             listenerImpl.trim(), true, JavaUtils.getClassLoader()).getConstructor(
                 Configuration.class).newInstance(conf);
         listeners.add(listener);
+      } catch (InvocationTargetException ie) {
+        throw new MetaException("Failed to instantiate listener named: "+
+            listenerImpl + ", reason: " + ie.getCause());
       } catch (Exception e) {
         throw new MetaException("Failed to instantiate listener named: "+
-            listenerImpl + e.toString());
+            listenerImpl + ", reason: " + e);
       }
     }
 
@@ -1077,6 +1138,39 @@ public class MetaStoreUtils {
     } catch (Exception e) {
       throw new RuntimeException("Unable to instantiate " + theClass.getName(), e);
     }
+  }
+
+  public static void validatePartitionNameCharacters(List<String> partVals,
+      Pattern partitionValidationPattern) throws MetaException {
+
+    String invalidPartitionVal =
+        getPartitionValWithInvalidCharacter(partVals, partitionValidationPattern);
+    if (invalidPartitionVal != null) {
+      throw new MetaException("Partition value '" + invalidPartitionVal +
+          "' contains a character " + "not matched by whitelist pattern '" +
+          partitionValidationPattern.toString() + "'.  " + "(configure with " +
+          HiveConf.ConfVars.METASTORE_PARTITION_NAME_WHITELIST_PATTERN.varname + ")");
+      }
+  }
+
+  public static boolean partitionNameHasValidCharacters(List<String> partVals,
+      Pattern partitionValidationPattern) {
+    return getPartitionValWithInvalidCharacter(partVals, partitionValidationPattern) == null;
+  }
+
+  private static String getPartitionValWithInvalidCharacter(List<String> partVals,
+      Pattern partitionValidationPattern) {
+    if (partitionValidationPattern == null) {
+      return null;
+    }
+
+    for (String partVal : partVals) {
+      if (!partitionValidationPattern.matcher(partVal).matches()) {
+        return partVal;
+      }
+    }
+
+    return null;
   }
 
 }

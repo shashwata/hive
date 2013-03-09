@@ -71,6 +71,14 @@
 </property>
 
 <property>
+  <name>hive.cli.pretty.output.num.cols</name>
+  <value>-1</value>
+  <description>The number of columns to use when formatting output generated
+        by the DESCRIBE PRETTY table_name command.  If the value of this property
+        is -1, then hive will use the auto-detected terminal width.</description>
+</property>
+
+<property>
   <name>hive.exec.scratchdir</name>
   <value>/tmp/hive-${user.name}</value>
   <description>Scratch space for Hive jobs</description>
@@ -278,7 +286,7 @@
 <property>
   <name>hive.metastore.partition.name.whitelist.pattern</name>
   <value></value>
-  <description>Partition names will be checked against this regex pattern and rejected if not matched.  To use, enable hive.metastore.pre.event.listeners=org.apache.hadoop.hive.metastore.PartitionNameWhitelistPreEventListener  Listener will not register if this property value is empty.</description>
+  <description>Partition names will be checked against this regex pattern and rejected if not matched.</description>
 </property>
 
 <property>
@@ -497,7 +505,7 @@
     The merge is triggered if either of hive.merge.mapfiles or hive.merge.mapredfiles is set to true.
     If the user has set hive.merge.mapfiles to true and hive.merge.mapredfiles to false, the idea was the
     number of reducers are few, so the number of files anyway are small. However, with this optimization,
-    we are increasing the number of files possibly by a big margin. So, we merge aggresively.
+    we are increasing the number of files possibly by a big margin. So, we merge aggresively.</description>
 </property>
 
 <property>
@@ -505,7 +513,7 @@
   <value>false</value>
   <description>Whether the version of hadoop which is running supports sub-directories for tables/partitions.
     Many hive optimizations can be applied if the hadoop version supports sub-directories for
-    tables/partitions. It was added by MAPREDUCE-1501
+    tables/partitions. It was added by MAPREDUCE-1501</description>
 </property>
 
 <property>
@@ -522,6 +530,22 @@
   <description>If the bucketing/sorting properties of the table exactly match the grouping key, whether to
     perform the group by in the mapper by using BucketizedHiveInputFormat. The only downside to this
     is that it limits the number of mappers to the number of files.
+  </description>
+</property>
+
+<property>
+  <name>hive.new.job.grouping.set.cardinality</name>
+  <value>30</value>
+  <description>
+    Whether a new map-reduce job should be launched for grouping sets/rollups/cubes.
+    For a query like: select a, b, c, count(1) from T group by a, b, c with rollup;
+    4 rows are created per row: (a, b, c), (a, b, null), (a, null, null), (null, null, null).
+    This can lead to explosion across map-reduce boundary if the cardinality of T is very high,
+    and map-side aggregation does not do a very good job. 
+
+    This parameter decides if hive should add an additional map-reduce job. If the grouping set
+    cardinality (4 in the example above), is more than this value, a new MR job is added under the
+    assumption that the orginal group by will reduce the data size.
   </description>
 </property>
 
@@ -737,12 +761,6 @@
 </property>
 
 <property>
-  <name>hive.mergejob.maponly</name>
-  <value>true</value>
-  <description>Try to generate a map-only job for merging files if CombineHiveInputFormat is supported.</description>
-</property>
-
-<property>
   <name>hive.heartbeat.interval</name>
   <value>1000</value>
   <description>Send a heartbeat after this interval - used by mapjoin and filter operators</description>
@@ -790,6 +808,23 @@
   <description>Whether Hive enable the optimization about converting common join into mapjoin based on the input file size</description>
 </property>
 
+<property>
+  <name>hive.auto.convert.join.noconditionaltask</name>
+  <value>false</value>
+  <description>Whether Hive enable the optimization about converting common join into mapjoin based on the input file 
+    size. If this paramater is on, and the sum of size for n-1 of the tables/partitions for a n-way join is smaller than the
+    specified size, the join is directly converted to a mapjoin (there is no conditional task).
+  </description>
+</property>
+
+<property>
+  <name>hive.auto.convert.join.noconditionaltask.size</name>
+  <value>10000000</value>
+  <description>If hive.auto.convert.join.noconditionaltask is off, this parameter does not take affect. However, if it
+    is on, and the sum of size for n-1 of the tables/partitions for a n-way join is smaller than this size, the join is directly
+    converted to a mapjoin(there is no conditional task). The default is 10MB
+  </description>
+</property>
 
 <property>
   <name>hive.script.auto.progress</name>
@@ -896,6 +931,27 @@
   <value>false</value>
   <description>If the user asked for sort-merge bucketed map-side join, and it cannot be performed,
     should the query fail or not ?
+  </description>
+</property>
+
+<property>
+  <name>hive.auto.convert.sortmerge.join</name>
+  <value>false</value>
+  <description>Will the join be automatically converted to a sort-merge join, if the joined tables pass
+    the criteria for sort-merge join.
+  </description>
+</property>
+
+<property>
+  <name>hive.auto.convert.sortmerge.join.bigtable.selection.policy</name>
+  <value>org.apache.hadoop.hive.ql.optimizer.LeftmostBigTableSelectorForAutoSMJ</value>
+  <description>The policy to choose the big table for automatic conversion to sort-merge join.
+    By default, the leftmost table is assigned the big table. Other policies are based on size:
+    . based on total size (all the partitions selected in the query) of the table 
+    org.apache.hadoop.hive.ql.optimizer.TableSizeBasedBigTableSelectorForAutoSMJ.
+    . based on average size (all the partitions selected in the query) of the table 
+    org.apache.hadoop.hive.ql.optimizer.AvgPartitionSizeBasedBigTableSelectorForAutoSMJ.
+    New policies can be added in future.
   </description>
 </property>
 
@@ -1032,6 +1088,42 @@
 </property>
 
 <property>
+  <name>hive.profiler.dbclass</name>
+  <value>jdbc:derby</value>
+  <description>The default database that stores temporary hive statistics.</description>
+</property>
+
+<property>
+  <name>hive.profiler.jdbcdriver</name>
+  <value>org.apache.derby.jdbc.EmbeddedDriver</value>
+  <description>The JDBC driver for the database that stores temporary hive statistics.</description>
+</property>
+
+<property>
+  <name>hive.profiler.dbconnectionstring</name>
+  <value>jdbc:derby:;databaseName=TempStatsStore;create=true</value>
+  <description>The default connection string for the database that stores temporary hive statistics.</description>
+</property>
+
+<property>
+  <name>hive.profiler.jdbc.timeout</name>
+  <value>30</value>
+  <description>Timeout value (number of seconds) used by JDBC connection and statements.</description>
+</property>
+
+<property>
+  <name>hive.profiler.retries.max</name>
+  <value>0</value>
+  <description>Maximum number of retries when profiler publisher/aggregator got an exception updating intermediate database. Default is no tries on failures.</description>
+</property>
+
+<property>
+  <name>hive.profiler.retries.wait</name>
+  <value>3000</value>
+  <description>The base waiting window (in milliseconds) before the next retry. The actual wait time is calculated by baseWindow * failues + baseWindow * (failure + 1) * (random number between [0.0,1.0]).</description>
+</property>
+
+<property>
   <name>hive.stats.dbclass</name>
   <value>jdbc:derby</value>
   <description>The default database that stores temporary hive statistics.</description>
@@ -1103,6 +1195,14 @@
 </property>
 
 <property>
+  <name>hive.stats.collect.scancols</name>
+  <value>false</value>
+  <description>Whether column accesses are tracked in the QueryPlan.
+    This is useful to identify how tables are accessed and to determine if there are wasted columns that can be trimmed.
+  </description>
+</property>
+
+<property>
   <name>hive.stats.ndv.error</name>
   <value>20.0</value>
   <description>Standard error expressed in percentage. Provides a tradeoff between accuracy and compute cost.A lower value for error indicates higher accuracy and a higher compute cost.
@@ -1114,7 +1214,7 @@
   <value>200</value>
   <description>
     Determines if when the prefix of the key used for intermediate stats collection
-    exceeds a certain length, a hash of the key is used instead.  If the value < 0 then hashing
+    exceeds a certain length, a hash of the key is used instead.  If the value &lt; 0 then hashing
     is never used, if the value >= 0 then hashing is used only when the key prefixes length
     exceeds that value.  The key prefix is defined as everything preceding the task ID in the key.
   </description>
@@ -1625,6 +1725,39 @@
   <description>Hive log4j configuration file for execution mode(sub command).
   If the property is not set, then logging will be initialized using hive-exec-log4j.properties found on the classpath.
   If the property is set, the value must be a valid URI (java.net.URI, e.g. "file:///tmp/my-logging.properties"), which you can then extract a URL from and pass to PropertyConfigurator.configure(URL).</description>
+</property>
+
+<property>
+  <name>hive.exec.infer.bucket.sort</name>
+  <value>false</value>
+  <description>
+    If this is set, when writing partitions, the metadata will include the bucketing/sorting
+    properties with which the data was written if any (this will not overwrite the metadata
+    inherited from the table if the table is bucketed/sorted)
+  </description>
+</property>
+
+<property>
+  <name>hive.exec.infer.bucket.sort.num.buckets.power.two</name>
+  <value>false</value>
+  <description>
+    If this is set, when setting the number of reducers for the map reduce task which writes the
+    final output files, it will choose a number which is a power of two, unless the user specifies
+    the number of reducers to use using mapred.reduce.tasks.  The number of reducers
+    may be set to a power of two, only to be followed by a merge task meaning preventing
+    anything from being inferred.
+    With hive.exec.infer.bucket.sort set to true:
+    Advantages:  If this is not set, the number of buckets for partitions will seem arbitrary,
+                 which means that the number of mappers used for optimized joins, for example, will
+                 be very low.  With this set, since the number of buckets used for any partition is
+                 a power of two, the number of mappers used for optimized joins will be the least
+                 number of buckets used by any partition being joined.
+    Disadvantages: This may mean a much larger or much smaller number of reducers being used in the
+                   final map reduce job, e.g. if a job was originally going to take 257 reducers,
+                   it will now take 512 reducers, similarly if the max number of reducers is 511,
+                   and a job was going to use this many, it will now use 256 reducers.
+                 
+  </description>
 </property>
 
 <property>

@@ -69,26 +69,19 @@ STAGE PLANS:
           outputColumnNames: _col0, _col1
           Select Operator
             expressions:
-                  expr: _col0
-                  type: string
-                  expr: _col1
-                  type: bigint
+                  expr: UDFToInteger(_col0)
+                  type: int
+                  expr: UDFToInteger(_col1)
+                  type: int
             outputColumnNames: _col0, _col1
-            Select Operator
-              expressions:
-                    expr: UDFToInteger(_col0)
-                    type: int
-                    expr: UDFToInteger(_col1)
-                    type: int
-              outputColumnNames: _col0, _col1
-              File Output Operator
-                compressed: false
-                GlobalTableId: 1
-                table:
-                    input format: org.apache.hadoop.mapred.TextInputFormat
-                    output format: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
-                    serde: org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe
-                    name: default.test1
+            File Output Operator
+              compressed: false
+              GlobalTableId: 1
+              table:
+                  input format: org.apache.hadoop.mapred.TextInputFormat
+                  output format: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
+                  serde: org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe
+                  name: default.test1
 
   Stage: Stage-7
     Conditional Operator
@@ -629,11 +622,13 @@ STAGE PLANS:
 
 PREHOOK: query: insert overwrite table test1 select key from test_src
 PREHOOK: type: QUERY
+PREHOOK: Input: default@test_src
 PREHOOK: Input: default@test_src@ds=101
 PREHOOK: Input: default@test_src@ds=102
 PREHOOK: Output: default@test1
 POSTHOOK: query: insert overwrite table test1 select key from test_src
 POSTHOOK: type: QUERY
+POSTHOOK: Input: default@test_src
 POSTHOOK: Input: default@test_src@ds=101
 POSTHOOK: Input: default@test_src@ds=102
 POSTHOOK: Output: default@test1
@@ -748,11 +743,13 @@ STAGE PLANS:
 
 PREHOOK: query: insert overwrite table test1 select key from test_src
 PREHOOK: type: QUERY
+PREHOOK: Input: default@test_src
 PREHOOK: Input: default@test_src@ds=101
 PREHOOK: Input: default@test_src@ds=102
 PREHOOK: Output: default@test1
 POSTHOOK: query: insert overwrite table test1 select key from test_src
 POSTHOOK: type: QUERY
+POSTHOOK: Input: default@test_src
 POSTHOOK: Input: default@test_src@ds=101
 POSTHOOK: Input: default@test_src@ds=102
 POSTHOOK: Output: default@test1

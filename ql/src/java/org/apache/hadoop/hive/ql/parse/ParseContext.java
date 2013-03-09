@@ -34,6 +34,7 @@ import org.apache.hadoop.hive.ql.exec.GroupByOperator;
 import org.apache.hadoop.hive.ql.exec.JoinOperator;
 import org.apache.hadoop.hive.ql.exec.MapJoinOperator;
 import org.apache.hadoop.hive.ql.exec.Operator;
+import org.apache.hadoop.hive.ql.exec.SMBMapJoinOperator;
 import org.apache.hadoop.hive.ql.exec.TableScanOperator;
 import org.apache.hadoop.hive.ql.exec.Task;
 import org.apache.hadoop.hive.ql.hooks.LineageInfo;
@@ -71,6 +72,7 @@ public class ParseContext {
   private LinkedHashMap<Operator<? extends OperatorDesc>, OpParseContext> opParseCtx;
   private Map<JoinOperator, QBJoinTree> joinContext;
   private Map<MapJoinOperator, QBJoinTree> mapJoinContext;
+  private Map<SMBMapJoinOperator, QBJoinTree> smbMapJoinContext;
   private HashMap<TableScanOperator, Table> topToTable;
   private HashMap<String, SplitSample> nameToSplitSample;
   private List<LoadTableDesc> loadTableWork;
@@ -85,6 +87,7 @@ public class ParseContext {
   // reducer
   private Map<GroupByOperator, Set<String>> groupOpToInputTables;
   private Map<String, PrunedPartitionList> prunedPartitions;
+  private Map<String, ReadEntity> viewAliasToInput;
 
   /**
    * The lineage information.
@@ -159,6 +162,7 @@ public class ParseContext {
       HashMap<String, Operator<? extends OperatorDesc>> topSelOps,
       LinkedHashMap<Operator<? extends OperatorDesc>, OpParseContext> opParseCtx,
       Map<JoinOperator, QBJoinTree> joinContext,
+      Map<SMBMapJoinOperator, QBJoinTree> smbMapJoinContext,
       HashMap<TableScanOperator, Table> topToTable,
       List<LoadTableDesc> loadTableWork, List<LoadFileDesc> loadFileWork,
       Context ctx, HashMap<String, String> idToTableNameMap, int destTableId,
@@ -169,13 +173,15 @@ public class ParseContext {
       GlobalLimitCtx globalLimitCtx,
       HashMap<String, SplitSample> nameToSplitSample,
       HashSet<ReadEntity> semanticInputs, List<Task<? extends Serializable>> rootTasks,
-      Map<TableScanOperator, Map<String, ExprNodeDesc>> opToPartToSkewedPruner) {
+      Map<TableScanOperator, Map<String, ExprNodeDesc>> opToPartToSkewedPruner,
+      Map<String, ReadEntity> viewAliasToInput) {
     this.conf = conf;
     this.qb = qb;
     this.ast = ast;
     this.opToPartPruner = opToPartPruner;
     this.opToPartList = opToPartList;
     this.joinContext = joinContext;
+    this.smbMapJoinContext = smbMapJoinContext;
     this.topToTable = topToTable;
     this.loadFileWork = loadFileWork;
     this.loadTableWork = loadTableWork;
@@ -196,6 +202,7 @@ public class ParseContext {
     this.semanticInputs = semanticInputs;
     this.rootTasks = rootTasks;
     this.opToPartToSkewedPruner = opToPartToSkewedPruner;
+    this.viewAliasToInput = viewAliasToInput;
   }
 
   /**
@@ -525,6 +532,14 @@ public class ParseContext {
     this.mapJoinContext = mapJoinContext;
   }
 
+  public Map<SMBMapJoinOperator, QBJoinTree> getSmbMapJoinContext() {
+    return smbMapJoinContext;
+  }
+
+  public void setSmbMapJoinContext(Map<SMBMapJoinOperator, QBJoinTree> smbMapJoinContext) {
+    this.smbMapJoinContext = smbMapJoinContext;
+  }
+
   public GlobalLimitCtx getGlobalLimitCtx() {
     return globalLimitCtx;
   }
@@ -578,4 +593,7 @@ public class ParseContext {
     this.opToPartToSkewedPruner = opToPartToSkewedPruner;
   }
 
+  public Map<String, ReadEntity> getViewAliasToInput() {
+    return viewAliasToInput;
+  }
 }

@@ -113,7 +113,7 @@ public enum ErrorMsg {
   NO_VALID_PARTN(10056, "The query does not reference any valid partition. "
       + "To run this query, set hive.mapred.mode=nonstrict"),
   NO_OUTER_MAPJOIN(10057, "MAPJOIN cannot be performed with OUTER JOIN"),
-  INVALID_MAPJOIN_HINT(10058, "Neither table specified as map-table"),
+  INVALID_MAPJOIN_HINT(10058, "All tables are specified as map-table for join"),
   INVALID_MAPJOIN_TABLE(10059, "Result of a union cannot be a map table"),
   NON_BUCKETED_TABLE(10060, "Sampling expression needed for non-bucketed table"),
   BUCKETED_NUMERATOR_BIGGER_DENOMINATOR(10061, "Numerator should not be bigger than "
@@ -167,9 +167,6 @@ public enum ErrorMsg {
       + "hive.exec.dynamic.partition=true or specify partition column values"),
   DYNAMIC_PARTITION_STRICT_MODE(10096, "Dynamic partition strict mode requires at least one "
       + "static partition column. To turn this off set hive.exec.dynamic.partition.mode=nonstrict"),
-  DYNAMIC_PARTITION_MERGE(10097, "Dynamic partition does not support merging using "
-      + "non-CombineHiveInputFormat. Please check your hive.input.format setting and "
-      + "make sure your Hadoop version support CombineFileInputFormat"),
   NONEXISTPARTCOL(10098, "Non-Partition column appears in the partition specification: "),
   UNSUPPORTED_TYPE(10099, "DATE and DATETIME types aren't supported yet. Please use "
       + "TIMESTAMP instead"),
@@ -259,7 +256,8 @@ public enum ErrorMsg {
       10199,
       "hive.mapred.supports.subdirectories must be true"
           + " if any one of following is true: "
-          + " hive.optimize.listbucketing and mapred.input.dir.recursive"),
+          + " hive.optimize.listbucketing , mapred.input.dir.recursive"
+          + " and hive.optimize.union.remove."),
   SKEWED_TABLE_NO_COLUMN_NAME(10200, "No skewed column name."),
   SKEWED_TABLE_NO_COLUMN_VALUE(10201, "No skewed values."),
   SKEWED_TABLE_DUPLICATE_COLUMN_NAMES(10202,
@@ -312,6 +310,23 @@ public enum ErrorMsg {
     "Invalid position alias in Group By\n"),
   INVALID_POSITION_ALIAS_IN_ORDERBY(10221,
     "Invalid position alias in Order By\n"),
+
+  HIVE_GROUPING_SETS_THRESHOLD_NOT_ALLOWED_WITH_SKEW(10225,
+    "An additional MR job is introduced since the number of rows created per input row " +
+    "due to grouping sets is more than hive.new.job.grouping.set.cardinality. There is no need " +
+    "to handle skew separately. set hive.groupby.skewindata to false."),
+  HIVE_GROUPING_SETS_THRESHOLD_NOT_ALLOWED_WITH_DISTINCTS(10226,
+    "An additional MR job is introduced since the cardinality of grouping sets " +
+    "is more than hive.new.job.grouping.set.cardinality. This functionality is not supported " +
+    "with distincts. Either set hive.new.job.grouping.set.cardinality to a high number " +
+    "(higher than the number of rows per input row due to grouping sets in the query), or " +
+    "rewrite the query to not use distincts."),
+
+  OPERATOR_NOT_ALLOWED_WITH_MAPJOIN(10227,
+    "Not all clauses are supported with mapjoin hint. Please remove mapjoin hint."),
+
+  ANALYZE_TABLE_NOSCAN_NON_NATIVE(10228, "ANALYZE TABLE NOSCAN cannot be used for "
+      + "a non-native table"),
 
   SCRIPT_INIT_ERROR(20000, "Unable to initialize custom script."),
   SCRIPT_IO_ERROR(20001, "An error occurred while reading or writing to your custom script. "

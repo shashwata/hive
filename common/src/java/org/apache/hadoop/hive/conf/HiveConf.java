@@ -37,8 +37,6 @@ import javax.security.auth.login.LoginException;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.hive.common.LogUtils;
-import org.apache.hadoop.hive.common.LogUtils.LogInitializationException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.shims.ShimLoader;
 import org.apache.hadoop.mapred.JobConf;
@@ -130,6 +128,7 @@ public class HiveConf extends Configuration {
       HiveConf.ConfVars.HMSHANDLERATTEMPTS,
       HiveConf.ConfVars.HMSHANDLERINTERVAL,
       HiveConf.ConfVars.HMSHANDLERFORCERELOADCONF,
+      HiveConf.ConfVars.METASTORE_PARTITION_NAME_WHITELIST_PATTERN
       };
 
   /**
@@ -178,6 +177,7 @@ public class HiveConf extends Configuration {
     PREEXECHOOKS("hive.exec.pre.hooks", ""),
     POSTEXECHOOKS("hive.exec.post.hooks", ""),
     ONFAILUREHOOKS("hive.exec.failure.hooks", ""),
+    OPERATORHOOKS("hive.exec.operator.hooks", ""),
     CLIENTSTATSPUBLISHERS("hive.client.stats.publishers", ""),
     EXECPARALLEL("hive.exec.parallel", false), // parallel query launching
     EXECPARALLETHREADNUMBER("hive.exec.parallel.thread.number", 8),
@@ -351,6 +351,7 @@ public class HiveConf extends Configuration {
     CLIIGNOREERRORS("hive.cli.errors.ignore", false),
     CLIPRINTCURRENTDB("hive.cli.print.current.db", false),
     CLIPROMPT("hive.cli.prompt", "hive"),
+    CLIPRETTYOUTPUTNUMCOLS("hive.cli.pretty.output.num.cols", -1),
 
     HIVE_METASTORE_FS_HANDLER_CLS("hive.metastore.fs.handler.class", "org.apache.hadoop.hive.metastore.HiveMetaStoreFsImpl"),
 
@@ -407,6 +408,7 @@ public class HiveConf extends Configuration {
     HIVEMULTIGROUPBYSINGLEREDUCER("hive.multigroupby.singlereducer", true),
     HIVE_MAP_GROUPBY_SORT("hive.map.groupby.sorted", false),
     HIVE_GROUPBY_ORDERBY_POSITION_ALIAS("hive.groupby.orderby.position.alias", false),
+    HIVE_NEW_JOB_GROUPING_SET_CARDINALITY("hive.new.job.grouping.set.cardinality", 30),
 
     // for hive udtf operator
     HIVEUDTFAUTOPROGRESS("hive.udtf.auto.progress", false),
@@ -468,11 +470,13 @@ public class HiveConf extends Configuration {
     HIVEUSEEXPLICITRCFILEHEADER("hive.exec.rcfile.use.explicit.header", true),
 
     HIVESKEWJOIN("hive.optimize.skewjoin", false),
-    HIVECONVERTJOIN("hive.auto.convert.join", false),
+    HIVECONVERTJOIN("hive.auto.convert.join", true),
+    HIVECONVERTJOINNOCONDITIONALTASK("hive.auto.convert.join.noconditionaltask", false),
+    HIVECONVERTJOINNOCONDITIONALTASKTHRESHOLD("hive.auto.convert.join.noconditionaltask.size",
+        10000000L),
     HIVESKEWJOINKEY("hive.skewjoin.key", 100000),
     HIVESKEWJOINMAPJOINNUMMAPTASK("hive.skewjoin.mapjoin.map.tasks", 10000),
     HIVESKEWJOINMAPJOINMINSPLIT("hive.skewjoin.mapjoin.min.split", 33554432L), //32M
-    HIVEMERGEMAPONLY("hive.mergejob.maponly", true),
 
     HIVESENDHEARTBEAT("hive.heartbeat.interval", 1000),
     HIVELIMITMAXROWSIZE("hive.limit.row.max.size", 100000L),
@@ -496,6 +500,11 @@ public class HiveConf extends Configuration {
     HIVEPARTITIONER("hive.mapred.partitioner", "org.apache.hadoop.hive.ql.io.DefaultHivePartitioner"),
     HIVEENFORCESORTMERGEBUCKETMAPJOIN("hive.enforce.sortmergebucketmapjoin", false),
     HIVEENFORCEBUCKETMAPJOIN("hive.enforce.bucketmapjoin", false),
+
+    HIVE_AUTO_SORTMERGE_JOIN("hive.auto.convert.sortmerge.join", false),
+    HIVE_AUTO_SORTMERGE_JOIN_BIGTABLE_SELECTOR(
+        "hive.auto.convert.sortmerge.join.bigtable.selection.policy",
+        "org.apache.hadoop.hive.ql.optimizer.LeftmostBigTableSelectorForAutoSMJ"),
 
     HIVESCRIPTOPERATORTRUST("hive.exec.script.trust", false),
     HIVEROWOFFSET("hive.exec.rowoffset", false),
@@ -536,6 +545,18 @@ public class HiveConf extends Configuration {
     HIVE_INDEX_COMPACT_QUERY_MAX_SIZE("hive.index.compact.query.max.size", (long) 10 * 1024 * 1024 * 1024), // 10G
     HIVE_INDEX_COMPACT_BINARY_SEARCH("hive.index.compact.binary.search", true),
 
+    //Profiler
+    HIVEPROFILERDBCLASS("hive.profiler.dbclass","jdbc:derby"),
+    HIVEPROFILERJDBCDRIVER("hive.profiler.jdbcdriver", "org.apache.derby.jdbc.EmbeddedDriver"),
+    HIVEPROFILERDBCONNECTIONSTRING("hive.profiler.dbconnectionstring",
+        "jdbc:derby:;databaseName=TempProfilerStore;create=true"), // automatically create database
+    // default timeout for JDBC connection
+    HIVE_PROFILER_JDBC_TIMEOUT("hive.profiler.jdbc.timeout", 30),
+    HIVE_PROFILER_RETRIES_MAX("hive.stats.retries.max",
+        0),     // maximum # of retries to insert/select/delete the stats DB
+    HIVE_PROFILER_RETRIES_WAIT("hive.stats.retries.wait",
+        3000),  // # milliseconds to wait before the next retry
+
     // Statistics
     HIVESTATSAUTOGATHER("hive.stats.autogather", true),
     HIVESTATSDBCLASS("hive.stats.dbclass",
@@ -563,6 +584,8 @@ public class HiveConf extends Configuration {
     HIVE_STATS_RELIABLE("hive.stats.reliable", false),
     // Collect table access keys information for operators that can benefit from bucketing
     HIVE_STATS_COLLECT_TABLEKEYS("hive.stats.collect.tablekeys", false),
+    // Collect column access information
+    HIVE_STATS_COLLECT_SCANCOLS("hive.stats.collect.scancols", false),
     // standard error allowed for ndv estimates. A lower value indicates higher accuracy and a
     // higher compute cost.
     HIVE_STATS_NDV_ERROR("hive.stats.ndv.error", (float)20.0),
@@ -669,6 +692,17 @@ public class HiveConf extends Configuration {
     // outputs are ready
     HIVE_MULTI_INSERT_MOVE_TASKS_SHARE_DEPENDENCIES(
         "hive.multi.insert.move.tasks.share.dependencies", false),
+
+    // If this is set, when writing partitions, the metadata will include the bucketing/sorting
+    // properties with which the data was written if any (this will not overwrite the metadata
+    // inherited from the table if the table is bucketed/sorted)
+    HIVE_INFER_BUCKET_SORT("hive.exec.infer.bucket.sort", false),
+    // If this is set, when setting the number of reducers for the map reduce task which writes the
+    // final output files, it will choose a number which is a power of two.  The number of reducers
+    // may be set to a power of two, only to be followed by a merge task meaning preventing
+    // anything from being inferred.
+    HIVE_INFER_BUCKET_SORT_NUM_BUCKETS_POWER_TWO(
+        "hive.exec.infer.bucket.sort.num.buckets.power.two", false),
 
     /* The following section contains all configurations used for list bucketing feature.*/
     /* This is not for clients. but only for block merge task. */
