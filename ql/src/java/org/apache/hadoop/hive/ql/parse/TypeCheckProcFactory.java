@@ -138,7 +138,8 @@ public final class TypeCheckProcFactory {
     opRules.put(new RuleRegExp("R2", HiveParser.Number + "%|" +
         HiveParser.TinyintLiteral + "%|" +
         HiveParser.SmallintLiteral + "%|" +
-        HiveParser.BigintLiteral + "%"),
+        HiveParser.BigintLiteral + "%|" +
+        HiveParser.DecimalLiteral + "%"),
         getNumExprProcessor());
     opRules
         .put(new RuleRegExp("R3", HiveParser.Identifier + "%|"
@@ -252,6 +253,10 @@ public final class TypeCheckProcFactory {
           // Literal tinyint.
           v = Byte.valueOf(expr.getText().substring(
                 0, expr.getText().length() - 1));
+        } else if (expr.getText().endsWith("BD")) {
+          // Literal decimal
+          return new ExprNodeConstantDesc(TypeInfoFactory.decimalTypeInfo, 
+                expr.getText().substring(0, expr.getText().length() - 2));
         } else {
           v = Double.valueOf(expr.getText());
           v = Long.valueOf(expr.getText());
@@ -487,6 +492,7 @@ public final class TypeCheckProcFactory {
     static HashMap<Integer, String> specialUnaryOperatorTextHashMap;
     static HashMap<Integer, String> specialFunctionTextHashMap;
     static HashMap<Integer, String> conversionFunctionTextHashMap;
+    static HashSet<Integer> windowingTokens;
     static {
       specialUnaryOperatorTextHashMap = new HashMap<Integer, String>();
       specialUnaryOperatorTextHashMap.put(HiveParser.PLUS, "positive");
@@ -517,6 +523,22 @@ public final class TypeCheckProcFactory {
           serdeConstants.TIMESTAMP_TYPE_NAME);
       conversionFunctionTextHashMap.put(HiveParser.TOK_DECIMAL,
           serdeConstants.DECIMAL_TYPE_NAME);
+
+      windowingTokens = new HashSet<Integer>();
+      windowingTokens.add(HiveParser.KW_OVER);
+      windowingTokens.add(HiveParser.TOK_PARTITIONINGSPEC);
+      windowingTokens.add(HiveParser.TOK_DISTRIBUTEBY);
+      windowingTokens.add(HiveParser.TOK_SORTBY);
+      windowingTokens.add(HiveParser.TOK_CLUSTERBY);
+      windowingTokens.add(HiveParser.TOK_WINDOWSPEC);
+      windowingTokens.add(HiveParser.TOK_WINDOWRANGE);
+      windowingTokens.add(HiveParser.TOK_WINDOWVALUES);
+      windowingTokens.add(HiveParser.KW_UNBOUNDED);
+      windowingTokens.add(HiveParser.KW_PRECEDING);
+      windowingTokens.add(HiveParser.KW_FOLLOWING);
+      windowingTokens.add(HiveParser.KW_CURRENT);
+      windowingTokens.add(HiveParser.TOK_TABSORTCOLNAMEASC);
+      windowingTokens.add(HiveParser.TOK_TABSORTCOLNAMEDESC);
     }
 
     private static boolean isRedundantConversionFunction(ASTNode expr,
@@ -859,6 +881,20 @@ public final class TypeCheckProcFactory {
       }
 
       ASTNode expr = (ASTNode) nd;
+
+      /*
+       * A Windowing specification get added as a child to a UDAF invocation to distinguish it
+       * from similar UDAFs but on different windows.
+       * The UDAF is translated to a WindowFunction invocation in the PTFTranslator.
+       * So here we just return null for tokens that appear in a Window Specification.
+       * When the traversal reaches up to the UDAF invocation its ExprNodeDesc is build using the
+       * ColumnInfo in the InputRR. This is similar to how UDAFs are handled in Select lists.
+       * The difference is that there is translation for Window related tokens, so we just
+       * return null;
+       */
+      if ( windowingTokens.contains(expr.getType())) {
+        return null;
+      }
 
       if (expr.getType() == HiveParser.TOK_TABNAME) {
         return null;

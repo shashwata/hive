@@ -88,12 +88,14 @@ abstract public class AbstractSMBJoinProc extends AbstractBucketJoinProc impleme
     // Check whether the mapjoin is a bucketed mapjoin.
     // The above can be ascertained by checking the big table bucket -> small table buckets
     // mapping in the mapjoin descriptor.
+    // First check if this map-join operator is already a BucketMapJoin or not. If not give up
+    // we are only trying to convert a BucketMapJoin to sort-BucketMapJoin.
     if (mapJoinOp.getConf().getAliasBucketFileNameMapping() == null
       || mapJoinOp.getConf().getAliasBucketFileNameMapping().size() == 0) {
       return false;
     }
 
-    boolean tableSorted = true;
+    boolean tableEligibleForBucketedSortMergeJoin = true;
     QBJoinTree joinCxt = this.pGraphContext.getMapJoinContext()
       .get(mapJoinOp);
     if (joinCxt == null) {
@@ -111,8 +113,8 @@ abstract public class AbstractSMBJoinProc extends AbstractBucketJoinProc impleme
     List<Order> sortColumnsFirstTable = new ArrayList<Order>();
 
     for (int pos = 0; pos < srcs.length; pos++) {
-      tableSorted = tableSorted
-        && isTableSorted(smbJoinContext,
+      tableEligibleForBucketedSortMergeJoin = tableEligibleForBucketedSortMergeJoin
+        && isEligibleForBucketSortMergeJoin(smbJoinContext,
              pGraphContext,
              mapJoinOp.getConf().getKeys().get((byte) pos),
              joinCxt,
@@ -120,7 +122,7 @@ abstract public class AbstractSMBJoinProc extends AbstractBucketJoinProc impleme
              pos,
              sortColumnsFirstTable);
     }
-    if (!tableSorted) {
+    if (!tableEligibleForBucketedSortMergeJoin) {
       // this is a mapjoin but not suited for a sort merge bucket map join. check outer joins
       MapJoinProcessor.checkMapJoin(mapJoinOp.getConf().getPosBigTable(),
             mapJoinOp.getConf().getConds());
@@ -233,7 +235,7 @@ abstract public class AbstractSMBJoinProc extends AbstractBucketJoinProc impleme
    * @return
    * @throws SemanticException
    */
-  private boolean isTableSorted(
+  private boolean isEligibleForBucketSortMergeJoin(
     SortBucketJoinProcCtx smbJoinContext,
     ParseContext pctx,
     List<ExprNodeDesc> keys,
@@ -388,11 +390,10 @@ abstract public class AbstractSMBJoinProc extends AbstractBucketJoinProc impleme
   // Can the join operator be converted to a sort-merge join operator ?
   // It is already verified that the join can be converted to a bucket map join
   protected boolean checkConvertJoinToSMBJoin(
-    JoinOperator joinOperator,
-    SortBucketJoinProcCtx smbJoinContext,
-    ParseContext pGraphContext) throws SemanticException {
+      JoinOperator joinOperator,
+      SortBucketJoinProcCtx smbJoinContext,
+      ParseContext pGraphContext) throws SemanticException {
 
-    boolean tableSorted = true;
     QBJoinTree joinCtx = pGraphContext.getJoinContext().get(joinOperator);
 
     if (joinCtx == null) {
@@ -407,14 +408,15 @@ abstract public class AbstractSMBJoinProc extends AbstractBucketJoinProc impleme
     List<Order> sortColumnsFirstTable = new ArrayList<Order>();
 
     for (int pos = 0; pos < srcs.length; pos++) {
-      tableSorted = tableSorted &&
-        isTableSorted(smbJoinContext,
-                      pGraphContext,
-                      smbJoinContext.getKeyExprMap().get((byte)pos),
-                      joinCtx,
-                      srcs,
-                      pos,
-                      sortColumnsFirstTable);
+      if (!isEligibleForBucketSortMergeJoin(smbJoinContext,
+          pGraphContext,
+          smbJoinContext.getKeyExprMap().get((byte) pos),
+          joinCtx,
+          srcs,
+          pos,
+          sortColumnsFirstTable)) {
+        return false;
+      }
     }
 
     smbJoinContext.setSrcs(srcs);
@@ -487,9 +489,12 @@ abstract public class AbstractSMBJoinProc extends AbstractBucketJoinProc impleme
     }
 
     context.setKeyExprMap(keyExprMap);
-    String[] srcs = joinCtx.getBaseSrc();
-    for (int srcPos = 0; srcPos < srcs.length; srcPos++) {
-      srcs[srcPos] = QB.getAppendedAliasFromId(joinCtx.getId(), srcs[srcPos]);
+    // Make a deep copy of the aliases so that they are not changed in the context
+    String[] joinSrcs = joinCtx.getBaseSrc();
+    String[] srcs = new String[joinSrcs.length];
+    for (int srcPos = 0; srcPos < joinSrcs.length; srcPos++) {
+      joinSrcs[srcPos] = QB.getAppendedAliasFromId(joinCtx.getId(), joinSrcs[srcPos]);
+      srcs[srcPos] = new String(joinSrcs[srcPos]);
     }
 
     // Given a candidate map-join, can this join be converted.

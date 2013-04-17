@@ -175,6 +175,7 @@ TOK_TABLEROWFORMATFIELD;
 TOK_TABLEROWFORMATCOLLITEMS;
 TOK_TABLEROWFORMATMAPKEYS;
 TOK_TABLEROWFORMATLINES;
+TOK_TBLORCFILE;
 TOK_TBLSEQUENCEFILE;
 TOK_TBLTEXTFILE;
 TOK_TBLRCFILE;
@@ -287,6 +288,12 @@ TOK_SKEWED_LOCATIONS;
 TOK_SKEWED_LOCATION_LIST;
 TOK_SKEWED_LOCATION_MAP;
 TOK_STOREDASDIRS;
+TOK_PARTITIONINGSPEC;
+TOK_PTBLFUNCTION;
+TOK_WINDOWDEF;
+TOK_WINDOWSPEC;
+TOK_WINDOWVALUES;
+TOK_WINDOWRANGE;
 TOK_IGNOREPROTECTION;
 }
 
@@ -391,7 +398,7 @@ import java.util.HashMap;
     xlateMap.put("KW_COLLECTION", "COLLECTION");
     xlateMap.put("KW_ITEMS", "ITEMS");
     xlateMap.put("KW_KEYS", "KEYS");
-    xlateMap.put("KW_KEY_TYPE", "$KEY$");
+    xlateMap.put("KW_KEY_TYPE", "\$KEY\$");
     xlateMap.put("KW_LINES", "LINES");
     xlateMap.put("KW_STORED", "STORED");
     xlateMap.put("KW_SEQUENCEFILE", "SEQUENCEFILE");
@@ -419,8 +426,8 @@ import java.util.HashMap;
     xlateMap.put("KW_LIMIT", "LIMIT");
     xlateMap.put("KW_SET", "SET");
     xlateMap.put("KW_PROPERTIES", "TBLPROPERTIES");
-    xlateMap.put("KW_VALUE_TYPE", "$VALUE$");
-    xlateMap.put("KW_ELEM_TYPE", "$ELEM$");
+    xlateMap.put("KW_VALUE_TYPE", "\$VALUE\$");
+    xlateMap.put("KW_ELEM_TYPE", "\$ELEM\$");
 
     // Operators
     xlateMap.put("DOT", ".");
@@ -445,7 +452,7 @@ import java.util.HashMap;
     xlateMap.put("PLUS", "+");
     xlateMap.put("MINUS", "-");
     xlateMap.put("STAR", "*");
-    xlateMap.put("MOD", "%");
+    xlateMap.put("MOD", "\%");
 
     xlateMap.put("AMPERSAND", "&");
     xlateMap.put("TILDE", "~");
@@ -1145,6 +1152,7 @@ fileFormat
     : KW_SEQUENCEFILE  -> ^(TOK_TBLSEQUENCEFILE)
     | KW_TEXTFILE  -> ^(TOK_TBLTEXTFILE)
     | KW_RCFILE  -> ^(TOK_TBLRCFILE)
+    | KW_ORCFILE -> ^(TOK_TBLORCFILE)
     | KW_INPUTFORMAT inFmt=StringLiteral KW_OUTPUTFORMAT outFmt=StringLiteral (KW_INPUTDRIVER inDriver=StringLiteral KW_OUTPUTDRIVER outDriver=StringLiteral)?
       -> ^(TOK_TABLEFILEFORMAT $inFmt $outFmt $inDriver? $outDriver?)
     | genericSpec=identifier -> ^(TOK_FILEFORMAT_GENERIC $genericSpec)
@@ -1187,7 +1195,7 @@ descStatement
 analyzeStatement
 @init { msgs.push("analyze statement"); }
 @after { msgs.pop(); }
-    : KW_ANALYZE KW_TABLE (parttype=tableOrPartition) KW_COMPUTE KW_STATISTICS ((noscan=KW_NOSCAN) | (KW_FOR KW_COLUMNS statsColumnName=columnNameList))? -> ^(TOK_ANALYZE $parttype $noscan? $statsColumnName?)
+    : KW_ANALYZE KW_TABLE (parttype=tableOrPartition) KW_COMPUTE KW_STATISTICS ((noscan=KW_NOSCAN) | (partialscan=KW_PARTIALSCAN) | (KW_FOR KW_COLUMNS statsColumnName=columnNameList))? -> ^(TOK_ANALYZE $parttype $noscan? $partialscan? $statsColumnName?)
     ;
 
 showStatement
@@ -1562,6 +1570,7 @@ tableFileFormat
       KW_STORED KW_AS KW_SEQUENCEFILE  -> TOK_TBLSEQUENCEFILE
       | KW_STORED KW_AS KW_TEXTFILE  -> TOK_TBLTEXTFILE
       | KW_STORED KW_AS KW_RCFILE  -> TOK_TBLRCFILE
+      | KW_STORED KW_AS KW_ORCFILE -> TOK_TBLORCFILE
       | KW_STORED KW_AS KW_INPUTFORMAT inFmt=StringLiteral KW_OUTPUTFORMAT outFmt=StringLiteral (KW_INPUTDRIVER inDriver=StringLiteral KW_OUTPUTDRIVER outDriver=StringLiteral)?
       -> ^(TOK_TABLEFILEFORMAT $inFmt $outFmt $inDriver? $outDriver?)
       | KW_STORED KW_BY storageHandler=StringLiteral
@@ -1789,9 +1798,10 @@ regular_body
    clusterByClause?
    distributeByClause?
    sortByClause?
+   window_clause?
    limitClause? -> ^(TOK_QUERY fromClause ^(TOK_INSERT insertClause
                      selectClause whereClause? groupByClause? havingClause? orderByClause? clusterByClause?
-                     distributeByClause? sortByClause? limitClause?))
+                     distributeByClause? sortByClause? window_clause? limitClause?))
    |
    selectStatement
    ;
@@ -1807,9 +1817,10 @@ selectStatement
    clusterByClause?
    distributeByClause?
    sortByClause?
+   window_clause?
    limitClause? -> ^(TOK_QUERY fromClause ^(TOK_INSERT ^(TOK_DESTINATION ^(TOK_DIR TOK_TMP_FILE))
                      selectClause whereClause? groupByClause? havingClause? orderByClause? clusterByClause?
-                     distributeByClause? sortByClause? limitClause?))
+                     distributeByClause? sortByClause? window_clause? limitClause?))
    ;
 
 
@@ -1817,6 +1828,7 @@ body
    :
    insertClause
    selectClause
+   lateralView?
    whereClause?
    groupByClause?
    havingClause?
@@ -1824,11 +1836,13 @@ body
    clusterByClause?
    distributeByClause?
    sortByClause?
-   limitClause? -> ^(TOK_INSERT insertClause?
-                     selectClause whereClause? groupByClause? havingClause? orderByClause? clusterByClause?
-                     distributeByClause? sortByClause? limitClause?)
+   window_clause?
+   limitClause? -> ^(TOK_INSERT insertClause
+                     selectClause lateralView? whereClause? groupByClause? havingClause? orderByClause? clusterByClause?
+                     distributeByClause? sortByClause? window_clause? limitClause?)
    |
    selectClause
+   lateralView?
    whereClause?
    groupByClause?
    havingClause?
@@ -1836,9 +1850,10 @@ body
    clusterByClause?
    distributeByClause?
    sortByClause?
+   window_clause?
    limitClause? -> ^(TOK_INSERT ^(TOK_DESTINATION ^(TOK_DIR TOK_TMP_FILE))
-                     selectClause whereClause? groupByClause? havingClause? orderByClause? clusterByClause?
-                     distributeByClause? sortByClause? limitClause?)
+                     selectClause lateralView? whereClause? groupByClause? havingClause? orderByClause? clusterByClause?
+                     distributeByClause? sortByClause? window_clause? limitClause?)
    ;
 
 insertClause

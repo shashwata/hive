@@ -112,6 +112,8 @@ public class Driver implements CommandProcessor {
   static final private Log LOG = LogFactory.getLog(Driver.class.getName());
   static final private LogHelper console = new LogHelper(LOG);
 
+  private static final Object compileMonitor = new Object();
+  
   private int maxRows = 100;
   ByteStream.Output bos = new ByteStream.Output();
 
@@ -895,7 +897,10 @@ public class Driver implements CommandProcessor {
     perfLogger.PerfLogBegin(LOG, PerfLogger.DRIVER_RUN);
     perfLogger.PerfLogBegin(LOG, PerfLogger.TIME_TO_SUBMIT);
 
-    int ret = compile(command);
+    int ret;
+    synchronized (compileMonitor) {
+      ret = compile(command);
+    }
     if (ret != 0) {
       releaseLocks(ctx.getHiveLocks());
       return new CommandProcessorResponse(ret, errorMessage, SQLState);
@@ -1139,8 +1144,8 @@ public class Driver implements CommandProcessor {
         int exitVal = tskRes.getExitVal();
         if (exitVal != 0) {
           if (tsk.ifRetryCmdWhenFail()) {
-            if (running.size() != 0) {
-              taskCleanup();
+            if (!running.isEmpty()) {
+              taskCleanup(running);
             }
             // in case we decided to run everything in local mode, restore the
             // the jobtracker setting to its initial value
@@ -1184,8 +1189,8 @@ public class Driver implements CommandProcessor {
             }
             SQLState = "08S01";
             console.printError(errorMessage);
-            if (running.size() != 0) {
-              taskCleanup();
+            if (!running.isEmpty()) {
+              taskCleanup(running);
             }
             // in case we decided to run everything in local mode, restore the
             // the jobtracker setting to its initial value
@@ -1350,12 +1355,18 @@ public class Driver implements CommandProcessor {
   /**
    * Cleans up remaining tasks in case of failure
    */
-
-  public void taskCleanup() {
-    // The currently existing Shutdown hooks will be automatically called,
-    // killing the map-reduce processes.
-    // The non MR processes will be killed as well.
-    System.exit(9);
+  public void taskCleanup(Map<TaskResult, TaskRunner> running) {
+    for (Map.Entry<TaskResult, TaskRunner> entry : running.entrySet()) {
+      if (entry.getKey().isRunning()) {
+        Task<?> task = entry.getValue().getTask();
+        try {
+          task.shutdown();
+        } catch (Exception e) {
+          console.printError("Exception on shutting down task " + task.getId() + ": " + e);
+        }
+      }
+    }
+    running.clear();
   }
 
   /**

@@ -38,6 +38,7 @@ import org.apache.hadoop.hive.ql.plan.TableDesc;
 import org.apache.hadoop.hive.ql.plan.api.OperatorType;
 import org.apache.hadoop.hive.serde2.SerDe;
 import org.apache.hadoop.hive.serde2.SerDeException;
+import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorUtils;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorUtils.ObjectInspectorCopyOption;
 import org.apache.hadoop.hive.shims.ShimLoader;
@@ -118,7 +119,7 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
     keySerializer.initialize(null, keyTableDesc.getProperties());
     MapJoinMetaData.put(Integer.valueOf(metadataKeyTag), new HashTableSinkObjectCtx(
         ObjectInspectorUtils.getStandardObjectInspector(keySerializer.getObjectInspector(),
-            ObjectInspectorCopyOption.WRITABLE), keySerializer, keyTableDesc, hconf));
+            ObjectInspectorCopyOption.WRITABLE), keySerializer, keyTableDesc, false, hconf));
 
     for (int pos = 0; pos < order.length; pos++) {
       if (pos == posBigTable) {
@@ -134,9 +135,10 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
           null);
       valueSerDe.initialize(null, valueTableDesc.getProperties());
 
+      ObjectInspector inspector = valueSerDe.getObjectInspector();
       MapJoinMetaData.put(Integer.valueOf(pos), new HashTableSinkObjectCtx(ObjectInspectorUtils
-          .getStandardObjectInspector(valueSerDe.getObjectInspector(),
-              ObjectInspectorCopyOption.WRITABLE), valueSerDe, valueTableDesc, hconf));
+          .getStandardObjectInspector(inspector, ObjectInspectorCopyOption.WRITABLE),
+          valueSerDe, valueTableDesc, hasFilter(pos), hconf));
     }
   }
 
@@ -228,14 +230,8 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
       // compute keys and values as StandardObjects
       AbstractMapJoinKey key = JoinUtil.computeMapJoinKeys(row, joinKeys[alias],
           joinKeysObjectInspectors[alias]);
-      ArrayList<Object> value = JoinUtil.computeValues(row, joinValues[alias],
-          joinValuesObjectInspectors[alias], joinFilters[alias], joinFilterObjectInspectors
-              [alias], filterMap == null ? null : filterMap[alias]);
 
-
-      // Add the value to the ArrayList
-      storage[alias].add(value);
-
+      boolean joinNeeded = false;
       for (byte pos = 0; pos < order.length; pos++) {
         if (pos != alias) {
 
@@ -244,20 +240,30 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
 
           // there is no join-value or join-key has all null elements
           if (o == null || key.hasAnyNulls(nullsafes)) {
-            if (noOuterJoin) {
-              storage[pos] = emptyList;
-            } else {
+            if (!noOuterJoin) {
+              joinNeeded = true;
               storage[pos] = dummyObjVectors[pos];
+            } else {
+              storage[pos] = emptyList;
             }
           } else {
+            joinNeeded = true;
             rowContainer.reset(o.getObj());
             storage[pos] = rowContainer;
+            aliasFilterTags[pos] = o.getAliasFilter();
           }
         }
       }
 
-      // generate the output records
-      checkAndGenObject();
+      if (joinNeeded) {
+        ArrayList<Object> value = getFilteredValue(alias, row);
+
+        // Add the value to the ArrayList
+        storage[alias].add(value);
+
+        // generate the output records
+        checkAndGenObject();
+      }
 
       // done with the row
       storage[tag].clear();
